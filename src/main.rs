@@ -70,7 +70,8 @@ enum Commands {
         #[arg(short = 't', long, default_value_t = 0)]
         keyword_type: u32,
     },
-    /// 查看帖子全文与回复
+    /// 查看帖子全文与回复（别名 view）
+    #[command(alias = "view")]
     Thread {
         /// 帖子 ID（搜索结果里的 postId）
         post_id: i64,

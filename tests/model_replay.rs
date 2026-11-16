@@ -70,7 +70,7 @@ fn render_thread_markdown_with_htmd() {
         reply_num: Some(1),
         read_num: Some(10),
         create_time: Some("2026-10-27T04:33:48.000+00:00".into()),
-        user: Some(UserBrief { id: Some(1.into()), nickname: Some(" Tester ".trim().into()), avatar: None }),
+        user: Some(UserBrief { id: Some(1.into()), nickname: Some("Tester".into()), avatar: None, employee: Some(false), exp: None }),
         ..Default::default()
     };
     let md = render::render_thread(&topic, None, None);

@@ -19,6 +19,11 @@ pub struct UserBrief {
     pub nickname: Option<String>,
     #[serde(default)]
     pub avatar: Option<String>,
+    /// 沁恒官方员工标记（TECH 系列账号为 true；实测字段存在且可靠）
+    #[serde(default)]
+    pub employee: Option<bool>,
+    #[serde(default)]
+    pub exp: Option<i64>,
 }
 
 /// 帖子/回复通用结构（getById 的 data、thread.replies.records[] 同构）
@@ -61,6 +66,16 @@ impl Post {
             .as_ref()
             .and_then(|u| u.nickname.clone())
             .unwrap_or_else(|| "未知用户".into())
+    }
+
+    /// 带官方标识的作者名：如 "TECH62 ⚡[官方]"
+    pub fn author_tagged(&self) -> String {
+        let name = self.author_name();
+        if self.user.as_ref().and_then(|u| u.employee).unwrap_or(false) {
+            format!("{} ⚡[官方]", name)
+        } else {
+            name
+        }
     }
 
     /// 主帖详情获取失败时的兜底占位

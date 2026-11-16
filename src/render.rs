@@ -85,7 +85,7 @@ pub fn render_thread(topic: &Post, replies: Option<&crate::model::ReplyPage>, de
     }
     md.push_str(&format!(
         "**作者:** *{}*  **时间:** {}  **阅读:** {}  **回复:** {}\n\n",
-        topic.author_name(),
+        topic.author_tagged(),
         fmt_time(&topic.create_time),
         topic.read_num.unwrap_or(0),
         topic.reply_num.unwrap_or(0),
@@ -103,7 +103,7 @@ pub fn render_thread(topic: &Post, replies: Option<&crate::model::ReplyPage>, de
         for (i, r) in rp.records.iter().enumerate() {
             md.push_str(&format!(
                 "**{}#{}** *{}*\n\n",
-                r.author_name(),
+                r.author_tagged(),
                 i + 1,
                 fmt_time(&r.create_time)
             ));
