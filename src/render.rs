@@ -1,5 +1,28 @@
 use crate::model::{Post, SearchData};
+use std::io::IsTerminal;
 use termimad::MadSkin;
+
+/// stdout 是否为终端（管道/重定向时为 false）
+pub fn stdout_is_tty() -> bool {
+    std::io::stdout().is_terminal()
+}
+
+/// stderr 是否为终端（错误信息、日志的着色判断用）
+pub fn stderr_is_tty() -> bool {
+    std::io::stderr().is_terminal()
+}
+
+/// 色彩输出总开关：
+/// - `always`：强制着色
+/// - `never`：强制关闭
+/// - `auto`：仅当 stdout 是终端且未设置 NO_COLOR 环境变量时着色
+pub fn color_enabled(mode: crate::ColorMode) -> bool {
+    match mode {
+        crate::ColorMode::Always => true,
+        crate::ColorMode::Never => false,
+        crate::ColorMode::Auto => stdout_is_tty() && std::env::var_os("NO_COLOR").is_none(),
+    }
+}
 
 /// 全局皮肤：256 色安全配色，不用硬编码 RGB
 pub fn skin() -> MadSkin {
@@ -122,8 +145,55 @@ pub fn render_thread(topic: &Post, replies: Option<&crate::model::ReplyPage>, de
     md
 }
 
-/// 终端渲染（termimad）
-pub fn print_markdown(md: &str) {
+/// 终端渲染（termimad）。非 TTY（管道/重定向）时剥离所有 ANSI 转义序列。
+pub fn print_markdown(md: &str, color: bool) {
     let skin = skin();
-    skin.print_text(md);
+    if color {
+        skin.print_text(md);
+    } else {
+        // FmtText 先把渲染结果展开为字符串，再剥掉样式码，
+        // 保留 termimad 的排版（换行、表格对齐、代码块缩进）
+        let text = termimad::FmtText::from(&skin, md, None);
+        print!("{}", strip_ansi(&text.to_string()));
+    }
+}
+
+/// 剥离 ANSI 转义序列（CSI 与 OSC 两种）
+pub fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            match chars.peek() {
+                Some('[') => {
+                    // CSI: \x1b[ 参数字节(0x30-0x3F) 中间字节(0x20-0x2F) 终止字节(0x40-0x7E)
+                    chars.next();
+                    while let Some(&n) = chars.peek() {
+                        chars.next();
+                        if ('@'..='~').contains(&n) {
+                            break;
+                        }
+                    }
+                }
+                Some(']') => {
+                    // OSC: \x1b] ... BEL 或 ST(ESC \)
+                    chars.next();
+                    while let Some(&n) = chars.peek() {
+                        chars.next();
+                        if n == '\x07' || n == '\\' {
+                            break;
+                        }
+                    }
+                }
+                Some(_) => {
+                    // 其他短转义（如 \x1bP 等），跳过一个字符
+                    chars.next();
+                }
+                None => {}
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }

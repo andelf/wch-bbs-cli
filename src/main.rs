@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 
 use std::path::PathBuf;
 
-use wch_bbs_cli::{api, auth, client, config, errors, model, render};
+use wch_bbs_cli::{api, auth, client, config, errors, model, render, ColorMode};
 
 use client::WchClient;
 use config::{Config, TokenStore};
@@ -27,6 +27,10 @@ struct Cli {
     /// 原始 JSON 输出（跳过终端渲染）
     #[arg(long, global = true)]
     json: bool,
+
+    /// 色彩输出模式（auto: 终端才着色；管道/重定向自动关闭）
+    #[arg(long, value_enum, default_value_t = ColorMode::Auto, global = true)]
+    color: ColorMode,
 
     #[command(subcommand)]
     command: Commands,
@@ -109,21 +113,27 @@ enum ConfigAction {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
-    init_logging(cli.verbose);
+    let use_color = render::color_enabled(cli.color);
+    init_logging(cli.verbose, use_color);
 
-    match run(cli).await {
+    match run(cli, use_color).await {
         Ok(code) => std::process::exit(code),
         Err(e) => {
             if e.exit_code() == 0 {
                 return; // 用户主动取消
             }
-            eprintln!("\x1b[31m错误:\x1b[0m {}", e);
+            // stderr 也按 TTY 判断：错误信息走管道时不着色
+            if render::stderr_is_tty() && std::env::var_os("NO_COLOR").is_none() {
+                eprintln!("\x1b[31m错误:\x1b[0m {}", e);
+            } else {
+                eprintln!("错误: {}", e);
+            }
             std::process::exit(e.exit_code());
         }
     }
 }
 
-fn init_logging(verbose: u8) {
+fn init_logging(verbose: u8, use_color: bool) {
     let filter = match verbose {
         0 => "warn",
         1 => "info,wch_bbs_cli=debug",
@@ -132,10 +142,12 @@ fn init_logging(verbose: u8) {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::new(filter))
         .with_target(false)
+        // 日志写 stderr：非 TTY 时关闭 ANSI
+        .with_ansi(render::stderr_is_tty() && use_color)
         .init();
 }
 
-async fn run(cli: Cli) -> Result<i32> {
+async fn run(cli: Cli, use_color: bool) -> Result<i32> {
     let cfg_path = cli.config.clone().unwrap_or_else(config::default_config_path);
     let cfg = Config::load(&cfg_path)?;
 
@@ -195,7 +207,7 @@ async fn run(cli: Cli) -> Result<i32> {
                 println!("{}", serde_json::to_string_pretty(&data).unwrap());
             } else {
                 let md = render::render_search(&data);
-                render::print_markdown(&md);
+                render::print_markdown(&md, use_color);
             }
             Ok(0)
         }
@@ -223,7 +235,7 @@ async fn run(cli: Cli) -> Result<i32> {
                 let data = serde_json::json!({ "topic": topic, "replies": replies });
                 println!("{}", serde_json::to_string_pretty(&data).unwrap());
             } else {
-                render::print_markdown(&md);
+                render::print_markdown(&md, use_color);
             }
             Ok(0)
         }
