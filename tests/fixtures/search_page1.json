@@ -1,0 +1,46 @@
+{
+ "code": 0,
+ "message": null,
+ "data": {
+  "total": 49,
+  "list": [
+   {
+    "postId": 162478,
+    "replyId": 0,
+    "title": "CH32L103进入STOP3后电流大概13uA，多跑的电流可能在哪？",
+    "content": "rtc_wakeup_steps);\r\n    \r\n    while(1){\r\n        PWR_EnterSTOPMode(PWR_Regulator_LowPower, PWR_STOPEntry_<em>WFI</em>",
+    "createTime": "2026-10-27T04:33:48.000+00:00"
+   },
+   {
+    "postId": 161464,
+    "replyId": 0,
+    "title": "增加省电功能编译失败",
+    "content": "nbsp; &nbsp;PWR-&gt;CR &amp;= ~PWR_CR_PDDS; &nbsp; // PDDS=0 → STOP模式；PDDS=1是Standby待机 &nbsp; &nbsp;__<em>WFI</em>",
+    "createTime": "2026-09-22T01:43:03.000+00:00"
+   },
+   {
+    "postId": 159647,
+    "replyId": 0,
+    "title": "CH32L103进入_<em>WFI</em>后支持DMA控制GPIO吗",
+    "content": "CH32L103进入_<em>WFI</em>后支持DMA控制GPIO吗",
+    "createTime": "2026-08-03T15:14:56.000+00:00"
+   }
+  ],
+  "pageNum": 1,
+  "pageSize": 0,
+  "size": 0,
+  "startRow": 0,
+  "endRow": 0,
+  "pages": 0,
+  "prePage": 0,
+  "nextPage": 0,
+  "hasPreviousPage": false,
+  "hasNextPage": false,
+  "navigatePages": 0,
+  "navigatePageNums": null,
+  "navigateFirstPage": 0,
+  "navigateLastPage": 0,
+  "firstPage": false,
+  "lastPage": false
+ }
+}
