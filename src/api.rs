@@ -2,8 +2,9 @@ use crate::client::WchClient;
 use crate::errors::Result;
 use crate::model::{Post, SearchData, ThreadData, UserInfo};
 
-/// 关键词搜索：GET /pages/search
-/// 参数与浏览器版完全一致：q, current, type=dateline, range=主题, keywordType=0
+/// Keyword search: `GET /pages/search`.
+/// Parameters mirror the web client exactly:
+/// `q`, `current`, `type=dateline`, `range=主题`, `keywordType=0`.
 pub async fn search(
     client: &WchClient,
     keyword: &str,
@@ -25,13 +26,14 @@ pub async fn search(
         .await
 }
 
-/// 帖子详情：GET /posts/getById?id=
+/// Post detail: `GET /posts/getById?id=`.
 pub async fn post_detail(client: &WchClient, post_id: i64) -> Result<Post> {
     client.get_authed("/posts/getById", &[("id", post_id.to_string())]).await
 }
 
-/// 帖子 + 回复分页：GET /posts/thread?id=&current=&size=
-/// 注意：size 必传，否则 replies 返回空对象（调研实测确认）
+/// Post + paginated replies: `GET /posts/thread?id=&current=&size=`.
+/// Note: `size` is required — without it the API returns an empty replies
+/// object (verified during API research).
 pub async fn thread_page(client: &WchClient, post_id: i64, current: u32, size: u32) -> Result<ThreadData> {
     client
         .get_authed(
@@ -45,7 +47,7 @@ pub async fn thread_page(client: &WchClient, post_id: i64, current: u32, size: u
         .await
 }
 
-/// 聚合全部回复页（thread --all）
+/// Aggregate all reply pages (`thread --all`).
 pub async fn thread_all(client: &WchClient, post_id: i64, size: u32) -> Result<ThreadData> {
     let first = thread_page(client, post_id, 1, size).await?;
     let mut merged = first.clone();
@@ -70,7 +72,7 @@ pub async fn thread_all(client: &WchClient, post_id: i64, size: u32) -> Result<T
     Ok(merged)
 }
 
-/// 当前用户：GET /auth/info
+/// Current user: `GET /auth/info`.
 pub async fn whoami(client: &WchClient) -> Result<UserInfo> {
     client.get_authed("/auth/info", &[]).await
 }

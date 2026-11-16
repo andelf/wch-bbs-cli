@@ -1,39 +1,40 @@
 use thiserror::Error;
 
-/// 应用统一错误类型，映射到 CLI 退出码（见 spec §8）
+/// Unified application error type, mapped to CLI exit codes (see spec §8).
 #[derive(Debug, Error)]
 pub enum AppError {
-    /// 网络层错误
-    #[error("网络错误: {0}")]
+    /// Transport-level error (reqwest).
+    #[error("network error: {0}")]
     Network(#[from] reqwest::Error),
 
-    /// 认证错误（登录失败 / token 过期且无法重登）
-    #[error("认证错误: {0}")]
+    /// Authentication error (login failure, or expired token that cannot be
+    /// refreshed automatically).
+    #[error("auth error: {0}")]
     Auth(String),
 
-    /// 配置错误
-    #[error("配置错误: {0}")]
+    /// Configuration error (missing/corrupt config file, bad permissions).
+    #[error("config error: {0}")]
     Config(String),
 
-    /// API 业务错误（code != 0）
-    #[error("API 错误 {code}: {message}")]
+    /// API business error (code != 0 in the response envelope).
+    #[error("API error {code}: {message}")]
     Api { code: i64, message: String },
 
-    /// 扫码流程失败
-    #[error("扫码登录失败: {0}")]
+    /// QR-code login flow failure.
+    #[error("QR login failed: {0}")]
     QrLogin(String),
 
-    /// 用户取消
-    #[error("已取消")]
+    /// Operation cancelled by the user.
+    #[error("cancelled")]
     Cancelled,
 
-    /// 内部错误（header 构造、编码等）
-    #[error("内部错误: {0}")]
+    /// Internal error (header construction, encoding, etc.).
+    #[error("internal error: {0}")]
     Internal(String),
 }
 
 impl AppError {
-    /// 退出码映射（spec §8）
+    /// Exit code mapping (see spec §8).
     pub fn exit_code(&self) -> i32 {
         match self {
             AppError::Network(_) => 1,
@@ -49,7 +50,7 @@ impl AppError {
 
 impl From<reqwest::header::InvalidHeaderValue> for AppError {
     fn from(e: reqwest::header::InvalidHeaderValue) -> Self {
-        AppError::Internal(format!("非法 header 值: {}", e))
+        AppError::Internal(format!("invalid header value: {}", e))
     }
 }
 

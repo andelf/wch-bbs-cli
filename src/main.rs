@@ -8,27 +8,27 @@ use client::WchClient;
 use config::{Config, TokenStore};
 use errors::{AppError, Result};
 
-/// 沁恒社区（wch.cn/bbs）命令行客户端
+/// Command line client for the WCH community forum (wch.cn/bbs)
 #[derive(Parser, Debug)]
 #[command(name = "wch-bbs-cli", version, about, long_about = None)]
 struct Cli {
-    /// 配置文件路径，默认 ~/.config/wch-bbs-cli/config.toml
+    /// Config file path (default: <config_dir>/wch-bbs-cli/config.toml)
     #[arg(short, long, global = true)]
     config: Option<PathBuf>,
 
-    /// 调试日志（-vv 更详细）
+    /// Verbose logging (-vv for more detail)
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     verbose: u8,
 
-    /// 只输出数据，不输出装饰
+    /// Print data only, without decoration
     #[arg(short, long, global = true)]
     quiet: bool,
 
-    /// 原始 JSON 输出（跳过终端渲染）
+    /// Raw JSON output (skip terminal rendering)
     #[arg(long, global = true)]
     json: bool,
 
-    /// 色彩输出模式（auto: 终端才着色；管道/重定向自动关闭）
+    /// Color output mode (auto: colorize only on a TTY; pipes/redirects disable colors)
     #[arg(long, value_enum, default_value_t = ColorMode::Auto, global = true)]
     color: ColorMode,
 
@@ -38,64 +38,64 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// 登录并缓存 token
+    /// Log in and cache the token
     Login {
-        /// 账号密码登录（读配置；缺密码则交互输入）
+        /// Password login (reads the config; prompts interactively if no password)
         #[arg(long)]
         password: bool,
-        /// 微信扫码登录
+        /// WeChat QR code login
         #[arg(long)]
         wechat: bool,
-        /// QQ 扫码登录
+        /// QQ QR code login
         #[arg(long)]
         qq: bool,
-        /// 扫码二维码同时导出为 PNG
+        /// Also export the login QR code as a PNG file
         #[arg(long)]
         qr_png: Option<PathBuf>,
-        /// 强制走无头浏览器兜底（需 browser feature，未启用则报错）
+        /// Force the headless-browser fallback (requires the `browser` feature; errors if absent)
         #[arg(long)]
         browser: bool,
     },
-    /// 清除本地 token 并退出登录
+    /// Clear the local token and log out
     Logout,
-    /// 显示当前登录用户
+    /// Show the currently logged-in user
     Whoami,
-    /// 关键词搜索帖子
+    /// Search posts by keyword
     Search {
-        /// 搜索关键词（至少 2 个字符）
+        /// Search keyword (at least 2 characters)
         keyword: String,
-        /// 页码
+        /// Page number
         #[arg(short, long, default_value_t = 1)]
         page: u32,
-        /// 范围：主题 | 主题包含回复
+        /// Search scope (raw server parameter; default "主题" = topics)
         #[arg(short, long, default_value = "主题")]
         range: String,
-        /// keywordType（服务端原始参数，默认 0）
+        /// keywordType (raw server parameter, default 0)
         #[arg(short = 't', long, default_value_t = 0)]
         keyword_type: u32,
     },
-    /// 查看帖子全文与回复（别名 view）
+    /// View a topic with all its replies (alias: view)
     #[command(alias = "view")]
     Thread {
-        /// 帖子 ID（搜索结果里的 postId）
+        /// Post ID (the postId shown in search results)
         post_id: i64,
-        /// 回复页码
+        /// Reply page number
         #[arg(short, long, default_value_t = 1)]
         page: u32,
-        /// 每页回复数
+        /// Replies per page
         #[arg(short, long, default_value_t = 20)]
         size: u32,
-        /// 聚合全部回复页
+        /// Aggregate all reply pages
         #[arg(long)]
         all: bool,
-        /// 只看主帖
+        /// Show the topic only, without replies
         #[arg(long)]
         no_replies: bool,
-        /// 输出 Markdown 到文件而非终端渲染
+        /// Write Markdown to a file instead of rendering to the terminal
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
-    /// 配置管理
+    /// Configuration management
     Config {
         #[command(subcommand)]
         action: ConfigAction,
@@ -104,9 +104,9 @@ enum Commands {
 
 #[derive(Subcommand, Debug)]
 enum ConfigAction {
-    /// 生成默认配置文件
+    /// Generate the default config file
     Init,
-    /// 显示当前配置（隐藏密码）
+    /// Show the current config (password masked)
     Show,
 }
 
@@ -120,13 +120,13 @@ async fn main() {
         Ok(code) => std::process::exit(code),
         Err(e) => {
             if e.exit_code() == 0 {
-                return; // 用户主动取消
+                return; // user-initiated cancellation
             }
-            // stderr 也按 TTY 判断：错误信息走管道时不着色
+            // stderr is also TTY-gated: error messages stay plain when piped
             if render::stderr_is_tty() && std::env::var_os("NO_COLOR").is_none() {
-                eprintln!("\x1b[31m错误:\x1b[0m {}", e);
+                eprintln!("\x1b[31mError:\x1b[0m {}", e);
             } else {
-                eprintln!("错误: {}", e);
+                eprintln!("Error: {}", e);
             }
             std::process::exit(e.exit_code());
         }
@@ -142,7 +142,7 @@ fn init_logging(verbose: u8, use_color: bool) {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::new(filter))
         .with_target(false)
-        // 日志写 stderr：非 TTY 时关闭 ANSI
+        // Logs go to stderr: disable ANSI when not a TTY.
         .with_ansi(render::stderr_is_tty() && use_color)
         .init();
 }
@@ -155,7 +155,7 @@ async fn run(cli: Cli, use_color: bool) -> Result<i32> {
         Commands::Config { action } => match action {
             ConfigAction::Init => {
                 Config::init_default(&cfg_path)?;
-                println!("已生成默认配置: {}", cfg_path.display());
+                println!("Default config written to {}", cfg_path.display());
                 Ok(0)
             }
             ConfigAction::Show => {
@@ -175,7 +175,7 @@ async fn run(cli: Cli, use_color: bool) -> Result<i32> {
         Commands::Logout => {
             let client = WchClient::new(cfg.client.clone(), TokenStore::load(), None)?;
             auth::logout(&client).await?;
-            println!("已退出登录并清除本地 token");
+            println!("Logged out; local token cleared");
             Ok(0)
         }
 
@@ -188,7 +188,7 @@ async fn run(cli: Cli, use_color: bool) -> Result<i32> {
                 println!("{}", info.nickname.as_deref().unwrap_or("?"));
             } else {
                 println!(
-                    "用户: {} (@{})  邮箱: {}",
+                    "User: {} (@{})  Email: {}",
                     info.nickname.as_deref().unwrap_or("?"),
                     info.username.as_deref().unwrap_or("?"),
                     info.email.as_deref().unwrap_or("-")
@@ -199,7 +199,7 @@ async fn run(cli: Cli, use_color: bool) -> Result<i32> {
 
         Commands::Search { keyword, page, range, keyword_type } => {
             if keyword.chars().count() < 2 {
-                return Err(AppError::Api { code: -1, message: "关键词至少 2 个字符".into() });
+                return Err(AppError::Api { code: -1, message: "keyword must be at least 2 characters".into() });
             }
             let client = require_client(&cfg).await?;
             let data = api::search(&client, &keyword, page, &range, keyword_type).await?;
@@ -229,8 +229,8 @@ async fn run(cli: Cli, use_color: bool) -> Result<i32> {
             let md = render::render_thread(&topic, replies.as_ref(), detail.as_ref());
             if let Some(path) = output {
                 std::fs::write(&path, md.as_bytes())
-                    .map_err(|e| AppError::Config(format!("写入 {}: {}", path.display(), e)))?;
-                println!("已写入 {}", path.display());
+                    .map_err(|e| AppError::Config(format!("writing {}: {}", path.display(), e)))?;
+                println!("Written to {}", path.display());
             } else if cli.json {
                 let data = serde_json::json!({ "topic": topic, "replies": replies });
                 println!("{}", serde_json::to_string_pretty(&data).unwrap());
@@ -242,7 +242,8 @@ async fn run(cli: Cli, use_color: bool) -> Result<i32> {
     }
 }
 
-/// 组装已登录客户端：缓存 token → 无则按配置自动密码登录
+/// Build a logged-in client: cached token first, otherwise auto password
+/// login using the config.
 async fn require_client(cfg: &Config) -> Result<WchClient> {
     let token = TokenStore::load();
     let credentials = if cfg.auth.username.is_empty() {
@@ -254,7 +255,7 @@ async fn require_client(cfg: &Config) -> Result<WchClient> {
 
     if client.token().is_none() {
         if cfg.auth.username.is_empty() {
-            return Err(AppError::Auth("未登录：请先执行 wch-bbs-cli login".into()));
+            return Err(AppError::Auth("not logged in: run `wch-bbs-cli login` first".into()));
         }
         let password = if cfg.auth.password.is_empty() {
             auth::prompt_password(&cfg.auth.username)?
@@ -280,7 +281,7 @@ async fn do_login(
 ) -> Result<i32> {
     if browser {
         return Err(AppError::QrLogin(
-            "browser 兜底需要启用 browser feature 重新编译（当前版本未包含）".into(),
+            "the browser fallback requires rebuilding with the `browser` feature (not included in this build)".into(),
         ));
     }
     let client = WchClient::new(cfg.client.clone(), None, None)?;
@@ -290,16 +291,16 @@ async fn do_login(
     } else if qq {
         auth::qq_qr_login(&client).await?
     } else {
-        // 默认密码登录（未显式给 flag 时也走这里）
+        // Password login is the default (also used when no flag is given).
         let _ = password;
         let username = if cfg.auth.username.is_empty() {
-            eprint!("用户名: ");
+            eprint!("Username: ");
             use std::io::Write;
             std::io::stderr().flush().ok();
             let mut u = String::new();
             std::io::stdin()
                 .read_line(&mut u)
-                .map_err(|e| AppError::Auth(format!("读取输入失败: {}", e)))?;
+                .map_err(|e| AppError::Auth(format!("failed to read input: {}", e)))?;
             u.trim().to_string()
         } else {
             cfg.auth.username.clone()
@@ -309,8 +310,7 @@ async fn do_login(
         } else {
             cfg.auth.password.clone()
         };
-        let data = auth::password_login(&client, &username, &pwd).await?;
-        data
+        auth::password_login(&client, &username, &pwd).await?
     };
 
     TokenStore::save(&token)?;
@@ -321,7 +321,7 @@ async fn do_login(
         println!("{}", serde_json::to_string_pretty(&info).unwrap());
     } else {
         println!(
-            "登录成功: {} (@{})",
+            "Logged in as {} (@{})",
             info.nickname.as_deref().unwrap_or("?"),
             info.username.as_deref().unwrap_or("?")
         );

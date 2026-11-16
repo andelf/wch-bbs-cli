@@ -7,20 +7,21 @@ use crate::config::ClientConfig;
 use crate::errors::{AppError, Result};
 use crate::model::ApiResponse;
 
-/// 完整复刻 Chrome 120 (macOS) 对 api2.wch.cn 发起 XHR 时的请求头。
-/// 不使用 reqwest 的任何默认 header——所有出现在线上的 header 均由本模块显式设置。
+/// Request headers faithfully replicating a Chrome 120 (macOS) XHR to
+/// api2.wch.cn. No reqwest default headers are used — every header that
+/// appears on the wire is set explicitly here.
 pub fn chrome_headers(origin: &str, ua: &str, token: Option<&str>) -> Result<HeaderMap> {
     let mut h = HeaderMap::new();
 
-    // --- 浏览器身份 ---
+    // --- Browser identity ---
     h.insert(USER_AGENT, HeaderValue::from_str(ua)?);
-    // axios 默认 Accept
+    // axios default Accept
     h.insert(ACCEPT, HeaderValue::from_static("application/json, text/plain, */*"));
     h.insert(ACCEPT_LANGUAGE, HeaderValue::from_static("zh-CN,zh;q=0.9,en;q=0.8"));
-    // Chrome 会发送的压缩协商；只声明本客户端能解的编码
+    // Compression negotiation as Chrome sends it; only encodings we can decode.
     h.insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, deflate, br"));
 
-    // --- Client Hints（Chrome 120 必带） ---
+    // --- Client Hints (always present in Chrome 120) ---
     h.insert(
         HeaderName::from_static("sec-ch-ua"),
         HeaderValue::from_static("\"Not_A Brand\";v=\"8\", \"Chromium\";v=\"120\", \"Google Chrome\";v=\"120\""),
@@ -28,16 +29,16 @@ pub fn chrome_headers(origin: &str, ua: &str, token: Option<&str>) -> Result<Hea
     h.insert(HeaderName::from_static("sec-ch-ua-mobile"), HeaderValue::from_static("?0"));
     h.insert(HeaderName::from_static("sec-ch-ua-platform"), HeaderValue::from_static("\"macOS\""));
 
-    // --- Fetch Metadata（跨站 XHR 必带） ---
+    // --- Fetch Metadata (required for cross-site XHR) ---
     h.insert(HeaderName::from_static("sec-fetch-dest"), HeaderValue::from_static("empty"));
     h.insert(HeaderName::from_static("sec-fetch-mode"), HeaderValue::from_static("cors"));
     h.insert(HeaderName::from_static("sec-fetch-site"), HeaderValue::from_static("same-site"));
 
-    // --- 来源 ---
+    // --- Origin / Referer ---
     h.insert(ORIGIN, HeaderValue::from_str(origin)?);
     h.insert(REFERER, HeaderValue::from_str(&format!("{}/", origin.trim_end_matches('/')))?);
 
-    // --- 认证 ---
+    // --- Auth ---
     if let Some(t) = token {
         if !t.is_empty() {
             h.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {}", t))?);
@@ -51,14 +52,16 @@ pub struct WchClient {
     http: reqwest::Client,
     pub cfg: ClientConfig,
     token: std::sync::RwLock<Option<String>>,
-    /// 携带的账号密码（用于 401 自动重登一次）；扫码-only 会话为 None
+    /// Credentials carried for one-shot auto re-login on 401; None for
+    /// QR-login-only sessions.
     credentials: Option<(String, String)>,
 }
 
 impl WchClient {
     pub fn new(cfg: ClientConfig, token: Option<String>, credentials: Option<(String, String)>) -> Result<Self> {
         let http = reqwest::Client::builder()
-            // header 完全由 chrome_headers() 每次请求时构建，不使用框架默认值
+            // Headers are fully built per request by chrome_headers();
+            // no framework defaults are used.
             .timeout(Duration::from_secs(30))
             .connect_timeout(Duration::from_secs(10))
             .build()?;
@@ -78,12 +81,13 @@ impl WchClient {
         *self.token.write().unwrap() = t;
     }
 
-    /// 基础 GET（不强制登录）。401 返回 Err(Unauthorized)
+    /// Plain GET (auth not required). A 401 yields `Err(Auth)`.
     pub async fn get_json<T: DeserializeOwned>(&self, path: &str, query: &[(&str, String)]) -> Result<T> {
         self.request_json(reqwest::Method::GET, path, query, false).await
     }
 
-    /// 需要登录态的 GET；401 时自动重登一次（仅当配置了账号密码）
+    /// GET with login state; on 401, re-authenticates once (only when
+    /// credentials are configured) and retries.
     pub async fn get_authed<T: DeserializeOwned>(&self, path: &str, query: &[(&str, String)]) -> Result<T> {
         match self.request_json(reqwest::Method::GET, path, query, true).await {
             Err(AppError::Auth(msg)) if msg.contains("401") => {
@@ -94,7 +98,7 @@ impl WchClient {
         }
     }
 
-    /// POST JSON body（登录等无需认证的写调用）
+    /// POST with a JSON body (unauthenticated calls such as login).
     pub async fn post_json<B: serde::Serialize, T: DeserializeOwned>(
         &self,
         path: &str,
@@ -112,7 +116,7 @@ impl WchClient {
         Self::parse_response(resp).await
     }
 
-    /// 无 body 的 GET 式登录后调用（如 /auth/wechat?code=..）
+    /// Body-less GET used after login (e.g. `/auth/wechat?code=..`).
     pub async fn get_token_exchange<T: DeserializeOwned>(&self, path: &str, query: &[(&str, String)]) -> Result<T> {
         self.request_json(reqwest::Method::GET, path, query, false).await
     }
@@ -127,7 +131,7 @@ impl WchClient {
         let url = format!("{}{}", self.cfg.base_url, path);
         let token = self.token();
         if authed && token.is_none() {
-            return Err(AppError::Auth("未登录：请先执行 wch-bbs-cli login".into()));
+            return Err(AppError::Auth("not logged in: run `wch-bbs-cli login` first".into()));
         }
         let headers = chrome_headers(&self.cfg.origin, &self.cfg.user_agent, token.as_deref())?;
         let mut req = self.http.request(method, &url).headers(headers);
@@ -135,7 +139,7 @@ impl WchClient {
             req = req.query(query);
         }
         let resp = req.send().await?;
-        // 频率礼貌间隔
+        // Polite rate limiting between consecutive requests.
         if self.cfg.request_interval_ms > 0 {
             tokio::time::sleep(Duration::from_millis(self.cfg.request_interval_ms)).await;
         }
@@ -145,10 +149,10 @@ impl WchClient {
     async fn parse_response<T: DeserializeOwned>(resp: reqwest::Response) -> Result<T> {
         let status = resp.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(AppError::Auth("HTTP 401 Unauthorized：token 无效或已过期".into()));
+            return Err(AppError::Auth("HTTP 401 Unauthorized: token invalid or expired".into()));
         }
         if !status.is_success() {
-            // 5xx 常为 WAF/网关层拦截或服务端异常
+            // 5xx is usually a WAF/gateway block or a server-side failure.
             return Err(AppError::Network(
                 resp.error_for_status()
                     .expect_err("expected non-success status"),
@@ -162,19 +166,19 @@ impl WchClient {
             });
         }
         api.data
-            .ok_or_else(|| AppError::Api { code: api.code, message: "data 为 null".into() })
+            .ok_or_else(|| AppError::Api { code: api.code, message: "data is null".into() })
     }
 
-    /// 401 自动重登（仅密码方式）
+    /// Auto re-login on 401 (password login only).
     async fn relogin(&self) -> Result<()> {
         let (u, p) = self
             .credentials
             .as_ref()
-            .ok_or_else(|| AppError::Auth("登录态失效，且配置中没有账号密码可自动重登。请重新执行 login".into()))?;
+            .ok_or_else(|| AppError::Auth("session expired and no credentials configured for auto re-login; run `wch-bbs-cli login` again".into()))?;
         let token = crate::auth::password_login(self, u, p).await?;
         self.set_token(Some(token.clone()));
         crate::config::TokenStore::save(&token)?;
-        tracing::info!("自动重登成功");
+        tracing::info!("auto re-login succeeded");
         Ok(())
     }
 }

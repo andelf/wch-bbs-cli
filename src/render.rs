@@ -2,20 +2,20 @@ use crate::model::{Post, SearchData};
 use std::io::IsTerminal;
 use termimad::MadSkin;
 
-/// stdout 是否为终端（管道/重定向时为 false）
+/// Whether stdout is a terminal (false for pipes / redirections).
 pub fn stdout_is_tty() -> bool {
     std::io::stdout().is_terminal()
 }
 
-/// stderr 是否为终端（错误信息、日志的着色判断用）
+/// Whether stderr is a terminal (used for error messages and log coloring).
 pub fn stderr_is_tty() -> bool {
     std::io::stderr().is_terminal()
 }
 
-/// 色彩输出总开关：
-/// - `always`：强制着色
-/// - `never`：强制关闭
-/// - `auto`：仅当 stdout 是终端且未设置 NO_COLOR 环境变量时着色
+/// Master switch for colored output:
+/// - `Always`: force colors
+/// - `Never`: disable colors
+/// - `Auto`: colorize only when stdout is a TTY and NO_COLOR is unset
 pub fn color_enabled(mode: crate::ColorMode) -> bool {
     match mode {
         crate::ColorMode::Always => true,
@@ -24,7 +24,7 @@ pub fn color_enabled(mode: crate::ColorMode) -> bool {
     }
 }
 
-/// 全局皮肤：256 色安全配色，不用硬编码 RGB
+/// Global skin: 256-color palette, no hardcoded RGB values.
 pub fn skin() -> MadSkin {
     let mut skin = MadSkin::default();
     use termimad::crossterm::style::Color;
@@ -35,7 +35,7 @@ pub fn skin() -> MadSkin {
     skin
 }
 
-/// HTML → Markdown（htmd，全局语义：跳过 script/style）
+/// HTML -> Markdown (htmd, global semantics: skip script/style tags).
 pub fn html_to_md(html: &str) -> String {
     static CONVERTER: std::sync::OnceLock<htmd::HtmlToMarkdown> = std::sync::OnceLock::new();
     let converter = CONVERTER.get_or_init(|| {
@@ -46,7 +46,8 @@ pub fn html_to_md(html: &str) -> String {
     converter.convert(html).unwrap_or_else(|_| html.to_string())
 }
 
-/// HTML → 纯文本单行摘要（搜索列表用，避免重型转换）
+/// HTML -> single-line plain text snippet (used by the search list to avoid
+/// heavy conversion).
 pub fn html_snippet(html: &str, max_chars: usize) -> String {
     let text = html2text::from_read(html.as_bytes(), max_chars.max(40) * 2);
     let one_line: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -62,16 +63,16 @@ fn fmt_time(iso: &Option<String>) -> String {
     iso.as_deref().unwrap_or("-").get(..10).unwrap_or("-").to_string()
 }
 
-/// 渲染搜索结果为表格
+/// Render search results as a Markdown table.
 pub fn render_search(data: &SearchData) -> String {
     let mut md = String::new();
-    md.push_str(&format!("## 搜索结果：共 {} 条\n\n", data.total));
+    md.push_str(&format!("## Search results: {} total\n\n", data.total));
     md.push_str("|:-:|:-:|:-|:-:|\n");
-    md.push_str("|**#**|**日期**|**标题**|**postId**|\n");
+    md.push_str("|**#**|**Date**|**Title**|**postId**|\n");
     md.push_str("|-:|:-:|:-|-:|\n");
     for (i, item) in data.list.iter().enumerate() {
-        let title = item.title.as_deref().unwrap_or("(无标题)");
-        // 搜索接口会返回 <em> 高亮标签，先转纯文本
+        let title = item.title.as_deref().unwrap_or("(no title)");
+        // The search API returns `<em>` highlight tags; strip them first.
         let clean = html_snippet(&format!("<p>{}</p>", title), 60);
         md.push_str(&format!(
             "| {} | {} | {} | {} |\n",
@@ -82,15 +83,15 @@ pub fn render_search(data: &SearchData) -> String {
         ));
     }
     if data.total as usize > data.list.len() {
-        md.push_str(&format!("\n*还有更多结果，使用 `-p <页码>` 翻页*\n"));
+        md.push_str("\n*More results available; use `-p <page>` to paginate*\n");
     }
     md
 }
 
-/// 渲染帖子 + 回复
+/// Render a topic with its replies.
 pub fn render_thread(topic: &Post, replies: Option<&crate::model::ReplyPage>, detail: Option<&Post>) -> String {
     let mut md = String::new();
-    md.push_str(&format!("# {}\n\n", topic.title.as_deref().unwrap_or("(无标题)")));
+    md.push_str(&format!("# {}\n\n", topic.title.as_deref().unwrap_or("(no title)")));
     if let Some(d) = detail {
         if let Some(tags) = &d.tags {
             if let Ok(arr) = serde_json::to_value(tags) {
@@ -100,14 +101,14 @@ pub fn render_thread(topic: &Post, replies: Option<&crate::model::ReplyPage>, de
                         .filter_map(|t| t.get("tagName").and_then(|v| v.as_str()).map(String::from))
                         .collect();
                     if !names.is_empty() {
-                        md.push_str(&format!("**标签:** {}\n\n", names.join(" / ")));
+                        md.push_str(&format!("**Tags:** {}\n\n", names.join(" / ")));
                     }
                 }
             }
         }
     }
     md.push_str(&format!(
-        "**作者:** *{}*  **时间:** {}  **阅读:** {}  **回复:** {}\n\n",
+        "**Author:** *{}*  **Date:** {}  **Views:** {}  **Replies:** {}\n\n",
         topic.author_tagged(),
         fmt_time(&topic.create_time),
         topic.read_num.unwrap_or(0),
@@ -118,7 +119,7 @@ pub fn render_thread(topic: &Post, replies: Option<&crate::model::ReplyPage>, de
 
     if let Some(rp) = replies {
         md.push_str(&format!(
-            "\n---\n\n## 回复 ({}/{} 页，共 {} 条)\n\n",
+            "\n---\n\n## Replies (page {}/{}, {} total)\n\n",
             rp.current.max(1),
             rp.pages.max(1),
             rp.total
@@ -136,7 +137,7 @@ pub fn render_thread(topic: &Post, replies: Option<&crate::model::ReplyPage>, de
         }
         if rp.current < rp.pages {
             md.push_str(&format!(
-                "\n*下一页：`wch-bbs-cli thread {} -p {}`*\n",
+                "\n*Next page: `wch-bbs-cli thread {} -p {}`*\n",
                 topic.id.unwrap_or(0),
                 rp.current + 1
             ));
@@ -145,20 +146,22 @@ pub fn render_thread(topic: &Post, replies: Option<&crate::model::ReplyPage>, de
     md
 }
 
-/// 终端渲染（termimad）。非 TTY（管道/重定向）时剥离所有 ANSI 转义序列。
+/// Terminal rendering (termimad). ANSI escape sequences are stripped when
+/// stdout is not a TTY (pipes / redirections).
 pub fn print_markdown(md: &str, color: bool) {
     let skin = skin();
     if color {
         skin.print_text(md);
     } else {
-        // FmtText 先把渲染结果展开为字符串，再剥掉样式码，
-        // 保留 termimad 的排版（换行、表格对齐、代码块缩进）
+        // Expand the rendered text to a string first, then strip style codes
+        // while keeping termimad's layout (line wrapping, table alignment,
+        // code block indentation).
         let text = termimad::FmtText::from(&skin, md, None);
         print!("{}", strip_ansi(&text.to_string()));
     }
 }
 
-/// 剥离 ANSI 转义序列（CSI 与 OSC 两种）
+/// Strip ANSI escape sequences (both CSI and OSC).
 pub fn strip_ansi(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
@@ -166,7 +169,8 @@ pub fn strip_ansi(s: &str) -> String {
         if c == '\x1b' {
             match chars.peek() {
                 Some('[') => {
-                    // CSI: \x1b[ 参数字节(0x30-0x3F) 中间字节(0x20-0x2F) 终止字节(0x40-0x7E)
+                    // CSI: ESC [ params (0x30-0x3F) intermediates (0x20-0x2F)
+                    // terminated by a final byte (0x40-0x7E).
                     chars.next();
                     while let Some(&n) = chars.peek() {
                         chars.next();
@@ -176,7 +180,7 @@ pub fn strip_ansi(s: &str) -> String {
                     }
                 }
                 Some(']') => {
-                    // OSC: \x1b] ... BEL 或 ST(ESC \)
+                    // OSC: ESC ] ... BEL or ST (ESC \)
                     chars.next();
                     while let Some(&n) = chars.peek() {
                         chars.next();
@@ -186,7 +190,7 @@ pub fn strip_ansi(s: &str) -> String {
                     }
                 }
                 Some(_) => {
-                    // 其他短转义（如 \x1bP 等），跳过一个字符
+                    // Other short escapes (e.g. ESC P): skip one character.
                     chars.next();
                 }
                 None => {}

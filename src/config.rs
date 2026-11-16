@@ -56,7 +56,7 @@ impl Default for ClientConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenderConfig {
-    /// 0 = 自适应终端宽度
+    /// 0 = adapt to terminal width.
     #[serde(default)]
     pub max_content_width: usize,
 }
@@ -77,7 +77,7 @@ pub struct Config {
     pub render: RenderConfig,
 }
 
-/// 返回配置目录：~/.config/wch-bbs-cli（可被 -c 覆盖）
+/// Default config directory: `<config_dir>/wch-bbs-cli` (overridable via `-c`).
 pub fn default_config_dir() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -93,16 +93,16 @@ pub fn token_path() -> PathBuf {
 }
 
 impl Config {
-    /// 从指定路径加载配置；文件不存在时返回默认配置
+    /// Load config from `path`; fall back to defaults when the file is absent.
     pub fn load(path: &PathBuf) -> Result<Self> {
         if !path.exists() {
             return Ok(Self::default());
         }
         let raw = fs::read_to_string(path)
-            .map_err(|e| AppError::Config(format!("读取 {}: {}", path.display(), e)))?;
+            .map_err(|e| AppError::Config(format!("reading {}: {}", path.display(), e)))?;
         let mut cfg: Config = toml::from_str(&raw)
-            .map_err(|e| AppError::Config(format!("解析 {}: {}", path.display(), e)))?;
-        // 环境变量优先（spec §7）
+            .map_err(|e| AppError::Config(format!("parsing {}: {}", path.display(), e)))?;
+        // Environment variables take precedence (spec §7).
         if let Ok(u) = std::env::var("WCH_USERNAME") {
             if !u.is_empty() {
                 cfg.auth.username = u;
@@ -114,46 +114,46 @@ impl Config {
         Ok(cfg)
     }
 
-    /// 写出默认配置（config init），并设置 0600 权限
+    /// Write the default config file (`config init`) with 0600 permissions.
     pub fn init_default(path: &PathBuf) -> Result<()> {
         if path.exists() {
-            return Err(AppError::Config(format!("{} 已存在", path.display())));
+            return Err(AppError::Config(format!("{} already exists", path.display())));
         }
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
-                .map_err(|e| AppError::Config(format!("创建目录失败: {}", e)))?;
+                .map_err(|e| AppError::Config(format!("creating directory: {}", e)))?;
         }
         let body = toml::to_string_pretty(&Self::default())
-            .map_err(|e| AppError::Config(format!("序列化失败: {}", e)))?;
+            .map_err(|e| AppError::Config(format!("serializing config: {}", e)))?;
         write_private(path, body.as_bytes())?;
         Ok(())
     }
 }
 
-/// 以 0600 权限写文件（token / 配置等敏感内容）
+/// Write a file with 0600 permissions (token / config and other secrets).
 pub fn write_private(path: &PathBuf, bytes: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
-            .map_err(|e| AppError::Config(format!("创建目录失败: {}", e)))?;
+            .map_err(|e| AppError::Config(format!("creating directory: {}", e)))?;
     }
     let mut f = fs::OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
         .open(path)
-        .map_err(|e| AppError::Config(format!("打开 {}: {}", path.display(), e)))?;
+        .map_err(|e| AppError::Config(format!("opening {}: {}", path.display(), e)))?;
     f.write_all(bytes)
-        .map_err(|e| AppError::Config(format!("写入 {}: {}", path.display(), e)))?;
+        .map_err(|e| AppError::Config(format!("writing {}: {}", path.display(), e)))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-            .map_err(|e| AppError::Config(format!("设置权限失败: {}", e)))?;
+            .map_err(|e| AppError::Config(format!("setting permissions: {}", e)))?;
     }
     Ok(())
 }
 
-/// token 缓存读写
+/// Token cache read/write helpers.
 pub struct TokenStore;
 
 impl TokenStore {

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-/// WCH 社区 API 统一响应包裹：{code, message, data}
-/// code=0 成功；HTTP 401 由 client 层识别处理
+/// Unified API response envelope: `{code, message, data}`.
+/// `code == 0` means success; HTTP 401 is handled by the client layer.
 #[derive(Debug, Deserialize)]
 pub struct ApiResponse<T> {
     pub code: i64,
@@ -19,14 +19,15 @@ pub struct UserBrief {
     pub nickname: Option<String>,
     #[serde(default)]
     pub avatar: Option<String>,
-    /// 沁恒官方员工标记（TECH 系列账号为 true；实测字段存在且可靠）
+    /// WCH employee flag (verified in the wild: TECH* accounts are `true`).
     #[serde(default)]
     pub employee: Option<bool>,
     #[serde(default)]
     pub exp: Option<i64>,
 }
 
-/// 帖子/回复通用结构（getById 的 data、thread.replies.records[] 同构）
+/// Post / reply shape shared by `getById` data and
+/// `thread.replies.records[]` entries.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Post {
@@ -65,24 +66,24 @@ impl Post {
         self.user
             .as_ref()
             .and_then(|u| u.nickname.clone())
-            .unwrap_or_else(|| "未知用户".into())
+            .unwrap_or_else(|| "(unknown user)".into())
     }
 
-    /// 带官方标识的作者名：如 "TECH62 ⚡[官方]"
+    /// Author name with an employee badge, e.g. `"TECH62 ⚡[Official]"`.
     pub fn author_tagged(&self) -> String {
         let name = self.author_name();
         if self.user.as_ref().and_then(|u| u.employee).unwrap_or(false) {
-            format!("{} ⚡[官方]", name)
+            format!("{} ⚡[Official]", name)
         } else {
             name
         }
     }
 
-    /// 主帖详情获取失败时的兜底占位
+    /// Placeholder when fetching the topic detail fails (replies still shown).
     pub fn fallback(id: i64) -> Self {
         Self {
             id: Some(id),
-            title: Some("(获取主帖详情失败，仅显示回复)".into()),
+            title: Some("(failed to fetch topic detail; showing replies only)".into()),
             ..Default::default()
         }
     }
@@ -109,7 +110,7 @@ impl Default for Post {
     }
 }
 
-/// /pages/search 的单条结果
+/// Single result of `GET /pages/search`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchItem {
@@ -133,7 +134,7 @@ pub struct SearchData {
     pub list: Vec<SearchItem>,
 }
 
-/// /posts/thread 的 data：{topic, replies}
+/// `data` of `GET /posts/thread`: `{topic, replies}`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThreadData {
     #[serde(default)]
@@ -142,7 +143,7 @@ pub struct ThreadData {
     pub replies: Option<ReplyPage>,
 }
 
-/// 通用分页包裹（mybatis-plus 风格）
+/// Generic pagination envelope (MyBatis-Plus style).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplyPage {
     #[serde(default)]
@@ -157,7 +158,7 @@ pub struct ReplyPage {
     pub size: i64,
 }
 
-/// /auth/login 的 data
+/// `data` of `POST /auth/login`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginData {
@@ -169,7 +170,7 @@ pub struct LoginData {
     pub last_login_time: Option<serde_json::Value>,
 }
 
-/// /auth/info 的 data（字段较多，仅取展示所需）
+/// `data` of `GET /auth/info` (many fields; only display-relevant ones kept).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserInfo {
     #[serde(default)]
@@ -182,5 +183,5 @@ pub struct UserInfo {
     pub email: Option<String>,
 }
 
-/// /auth/sns/token 的 data：state 随机串（直接是字符串）
+/// `data` of `GET /auth/sns/token`: a random state string (bare string).
 pub type SnsState = String;
