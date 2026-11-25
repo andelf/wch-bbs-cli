@@ -87,7 +87,7 @@ pub async fn wechat_qr_login(client: &WchClient, qr_png: Option<&std::path::Path
     // 2. extract the uuid from the qrconnect page
     let page_url = wechat_qrconnect_url(&state);
     let page = http_get_text(&page_url, "https://www.wch.cn/").await?;
-    let uuid = extract_re(&page, r#"uuid['"]?\s*[:=]\s*['"]([A-Za-z0-9_-]{20,})['"]"#)
+    let uuid = extract_qr_uuid(&page)
         .ok_or_else(|| AppError::QrLogin("failed to extract uuid from the qrconnect page; the WeChat page layout may have changed; try the --browser fallback".into()))?;
 
     // 3. render the QR code in the terminal (content = WeChat confirm URL,
@@ -109,15 +109,24 @@ pub async fn wechat_qr_login(client: &WchClient, qr_png: Option<&std::path::Path
     if let Some(png_path) = qr_png {
         // Build the PNG manually (qrcode's image renderer drifts with image
         // crate versions; assembling pixels ourselves is more stable).
+        // Layout: 4-module quiet zone on every side, 8x8 pixels per module —
+        // scanners need both to recognize the code.
+        const QUIET: u32 = 4;
+        const SCALE: u32 = 8;
         let colors = code.to_colors();
-        let n = (colors.len() as f64).sqrt().round() as u32;
-        let mut buf = image::GrayImage::new(n, n);
+        let n = (colors.len() as f64).sqrt().round() as usize;
+        let side = (n as u32 + 2 * QUIET) * SCALE;
+        let mut buf = image::GrayImage::from_pixel(side, side, image::Luma([255]));
         for (i, c) in colors.iter().enumerate() {
-            let x = (i % colors.len()) as u32;
-            let y = (i / colors.len()) as u32;
-            if y < n {
-                let v = if *c == qrcode::Color::Dark { 0 } else { 255 };
-                buf.put_pixel(x % n, y, image::Luma([v]));
+            if *c != qrcode::Color::Dark {
+                continue;
+            }
+            let mx = (i % n) as u32 + QUIET;
+            let my = (i / n) as u32 + QUIET;
+            for dy in 0..SCALE {
+                for dx in 0..SCALE {
+                    buf.put_pixel(mx * SCALE + dx, my * SCALE + dy, image::Luma([0]));
+                }
             }
         }
         buf.save(png_path)
@@ -126,42 +135,57 @@ pub async fn wechat_qr_login(client: &WchClient, qr_png: Option<&std::path::Path
     }
 
     // 4. poll (WeChat open platform codes: 408 waiting / 404 scanned, awaiting
-    //    confirmation / 405 confirmed, returns wx_code)
+    //    confirmation / 405 confirmed, returns wx_code / 402 expired / 403 refused)
     println!("Waiting for scan and confirmation… (up to 120 seconds, Ctrl+C to cancel)");
     let poll_url = "https://lp.open.weixin.qq.com/connect/l/qrconnect";
+    // The endpoint long-polls: the server holds each request ~15-25s before
+    // answering, so the per-request timeout must comfortably exceed that.
+    let poll_http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(40))
+        .build()?;
     let start = std::time::Instant::now();
+    let mut scan_hinted = false;
     loop {
         if start.elapsed() > std::time::Duration::from_secs(120) {
             return Err(AppError::QrLogin("QR login timed out".into()));
         }
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis())
             .unwrap_or(0);
-        let body = http_get_text(
-            &format!("{}?uuid={}&_={}", poll_url, uuid, ts),
-            &page_url,
-        )
-        .await
-        .map_err(|e| AppError::QrLogin(format!("polling failed: {}; try the --browser fallback", e)))?;
-        if let Some(code) = extract_re(&body, r#"wx_code['"]?\s*[:=]\s*['"]([^'"]+)['"]"#) {
-            if !code.is_empty() {
-                // 5. exchange the code for a token
-                let data: LoginData = client
-                    .get_token_exchange("/auth/wechat", &[("code", code), ("state", state.clone())])
-                    .await?;
-                return data
-                    .token
-                    .ok_or_else(|| AppError::QrLogin("WeChat callback token exchange failed: response is missing the token".into()));
+        let body = match poll_once(&poll_http, &format!("{}?uuid={}&_={}", poll_url, uuid, ts), &page_url).await {
+            Ok(b) => b,
+            Err(e) => {
+                // Long-poll hiccups (timeouts, transient resets) must not kill
+                // the login; retry until the overall deadline.
+                tracing::debug!("poll request failed, retrying: {}", e);
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                continue;
             }
-        }
-        if body.contains("402") {
-            return Err(AppError::QrLogin("QR code expired or cancelled by the user".into()));
-        }
-        // 404 = scanned, awaiting confirmation -> hint once.
-        if body.contains("404") && start.elapsed().as_secs() < 4 {
-            println!("Scanned; please confirm on your phone…");
+        };
+        let errcode = extract_re(&body, r"wx_errcode=(\d+)").unwrap_or_default();
+        match errcode.as_str() {
+            "405" => {
+                if let Some(code) = extract_re(&body, r#"wx_code['"]?\s*[:=]\s*['"]([^'"]+)['"]"#) {
+                    // 5. exchange the code for a token
+                    let data: LoginData = client
+                        .get_token_exchange("/auth/wechat", &[("code", code), ("state", state.clone())])
+                        .await?;
+                    return data
+                        .token
+                        .ok_or_else(|| AppError::QrLogin("WeChat callback token exchange failed: response is missing the token".into()));
+                }
+            }
+            "404" => {
+                if !scan_hinted {
+                    println!("Scanned; please confirm on your phone…");
+                    scan_hinted = true;
+                }
+            }
+            "402" => return Err(AppError::QrLogin("QR code expired; run the command again".into())),
+            "403" => return Err(AppError::QrLogin("login cancelled on the phone".into())),
+            // 408 = waiting for scan; anything else: keep polling.
+            _ => {}
         }
     }
 }
@@ -176,6 +200,37 @@ pub async fn qq_qr_login(_client: &WchClient) -> Result<String> {
 }
 
 // ---------- internal helpers ----------
+
+/// Extract the qrconnect uuid from the page. The page layout has changed over
+/// time, so try every known carrier, most stable first: the QR image src
+/// (`/connect/qrcode/<uuid>`), the long-poll URL (`qrconnect?uuid=<uuid>`,
+/// kept in a dev-tool comment "that must not be deleted"), and the legacy
+/// `uuid = "<...>"` JS assignment.
+fn extract_qr_uuid(page: &str) -> Option<String> {
+    for pattern in [
+        r"/connect/qrcode/([A-Za-z0-9_-]{10,})",
+        r"qrconnect\?uuid=([A-Za-z0-9_-]{10,})",
+        r#"uuid['"]?\s*[:=]\s*['"]([A-Za-z0-9_-]{10,})['"]"#,
+    ] {
+        if let Some(uuid) = extract_re(page, pattern) {
+            return Some(uuid);
+        }
+    }
+    None
+}
+
+/// One long-poll request against lp.open.weixin.qq.com (browser headers, no
+/// WchClient: the domain differs).
+async fn poll_once(http: &reqwest::Client, url: &str, referer: &str) -> Result<String> {
+    let cfg = crate::config::ClientConfig::default();
+    let mut headers = crate::client::chrome_headers("https://open.weixin.qq.com", &cfg.user_agent, None)?;
+    headers.insert(
+        reqwest::header::REFERER,
+        reqwest::header::HeaderValue::from_str(referer)?,
+    );
+    let resp = http.get(url).headers(headers).send().await?;
+    Ok(resp.text().await?)
+}
 
 /// Fetch arbitrary URL text with browser headers (WeChat pages; not routed
 /// through WchClient because the domain differs).
